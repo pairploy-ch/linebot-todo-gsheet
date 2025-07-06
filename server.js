@@ -500,5 +500,5 @@ app.listen(PORT, () => {
   console.log('   📝 List all todos');
   console.log('   🎉 Mark todos as done');
   console.log('   🗑️ Clear all todos');
-  console.log('   🕐 Check current time');
+
 });
