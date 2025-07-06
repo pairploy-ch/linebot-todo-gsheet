@@ -16,6 +16,7 @@ const client = new line.Client(config);
 // เก็บข้อมูล todo list และ scheduled jobs
 const todoList = new Map(); // userId -> todos[]
 const scheduledJobs = new Map(); // todoId -> job
+const reminderJobs = new Map(); // todoId -> reminder job (for repeated reminders)
 
 // Todo item structure
 class TodoItem {
@@ -35,54 +36,114 @@ function generateId(userId) {
   return (userTodos.length + 1).toString();
 }
 
-// Schedule reminder
+// Schedule reminder with repeated notifications
 function scheduleReminder(todoItem) {
   const job = schedule.scheduleJob(todoItem.reminderTime, async () => {
     try {
       const message = {
         type: 'text',
-        text: `🔔 แจ้งเตือน!\n📝 ${todoItem.task}\n\n💡 พิมพ์ "done ${todoItem.id}" เพื่อทำเครื่องหมายว่าเสร็จแล้ว`
+        text: `🔔😽 เมี๊ยวเตือน! -3- ด่วนๆ คุณทำสิ่งนี้รึยางงง 😽 \n📝 ${todoItem.task}\n\n💡 พิมพ์ "done ${todoItem.id}" เพื่อบอกหนูว่าคุณทำเสร็จแว้ว!`
       };
       
       await client.pushMessage(todoItem.userId, message);
-      console.log(`✅ Reminder sent for: ${todoItem.task}`);
+      console.log(`✅ Initial reminder sent for: ${todoItem.task} at ${formatDate(new Date())}`);
+      
+      // Start repeated reminders every hour
+      startRepeatedReminders(todoItem);
+      
     } catch (error) {
       console.error('❌ Error sending reminder:', error);
     }
   });
   
   scheduledJobs.set(todoItem.id, job);
+  console.log(`📅 Scheduled reminder for: ${todoItem.task} at ${formatDate(todoItem.reminderTime)}`);
 }
 
-// Parse date and time
+// Start repeated reminders every hour
+function startRepeatedReminders(todoItem) {
+  const reminderInterval = setInterval(async () => {
+    try {
+      // Check if todo still exists and not completed
+      const userTodos = todoList.get(todoItem.userId) || [];
+      const todoExists = userTodos.find(todo => todo.id === todoItem.id && !todo.completed);
+      
+      if (!todoExists) {
+        clearInterval(reminderInterval);
+        reminderJobs.delete(todoItem.id);
+        console.log(`🛑 Stopped hourly reminders for completed/deleted todo: ${todoItem.task}`);
+        return;
+      }
+      
+      const currentTime = getCurrentThailandTime();
+      const timePassed = Math.floor((currentTime - todoItem.reminderTime) / (1000 * 60 * 60)); // hours
+      
+      const message = {
+        type: 'text',
+        text: `🔔😽 แจ้งเตือนซ้ำ! -3- คุณยังไม่ได้ทำรึ? คุณอย่าช้า \n📝 ${todoItem.task}\n⏰ เวลาที่กำหนด: ${formatDate(todoItem.reminderTime)}\n⏳ เลยเวลามาแล้ว: ${timePassed} ชั่วโมง\n\n💡 พิมพ์ "done ${todoItem.id}" เพื่อบอกหนูว่าคุณทำเสร็จแว้ว!`
+      };
+      
+      await client.pushMessage(todoItem.userId, message);
+      console.log(`🔄 Hourly reminder sent for: ${todoItem.task} at ${formatDate(currentTime)} (${timePassed} hours overdue)`);
+      
+    } catch (error) {
+      console.error('❌ Error sending hourly reminder:', error);
+    }
+  }, 3600000); // 1 hour = 3600000 milliseconds
+  
+  reminderJobs.set(todoItem.id, reminderInterval);
+  console.log(`🔄 Started hourly reminders for: ${todoItem.task} (every 1 hour)`);
+}
+
+// Parse date and time - Fixed timezone handling
 function parseDateTime(dateTimeStr) {
   try {
-    // Support formats: "2024-12-25 14:30", "25/12/2024 14:30", "14:30" (today)
+    // Get current time in Thailand timezone
     const now = new Date();
+    const thailandNow = new Date(now.toLocaleString("en-US", {timeZone: "Asia/Bangkok"}));
     
     if (dateTimeStr.includes(' ')) {
       const [datePart, timePart] = dateTimeStr.split(' ');
       const [hour, minute] = timePart.split(':').map(Number);
       
+      // Validate time format
+      if (hour < 0 || hour > 23 || minute < 0 || minute > 59) {
+        return null;
+      }
+      
       let date;
       if (datePart.includes('-')) {
         // Format: YYYY-MM-DD
         const [year, month, day] = datePart.split('-').map(Number);
+        if (year < 2024 || month < 1 || month > 12 || day < 1 || day > 31) {
+          return null;
+        }
         date = new Date(year, month - 1, day, hour, minute);
       } else if (datePart.includes('/')) {
         // Format: DD/MM/YYYY
         const [day, month, year] = datePart.split('/').map(Number);
+        if (year < 2024 || month < 1 || month > 12 || day < 1 || day > 31) {
+          return null;
+        }
         date = new Date(year, month - 1, day, hour, minute);
+      } else {
+        return null;
       }
       
       return date;
     } else if (dateTimeStr.includes(':')) {
       // Format: HH:MM (today)
       const [hour, minute] = dateTimeStr.split(':').map(Number);
-      const date = new Date(now.getFullYear(), now.getMonth(), now.getDate(), hour, minute);
+      
+      // Validate time format
+      if (hour < 0 || hour > 23 || minute < 0 || minute > 59) {
+        return null;
+      }
+      
+      const date = new Date(thailandNow.getFullYear(), thailandNow.getMonth(), thailandNow.getDate(), hour, minute);
       
       // If time has passed today, schedule for tomorrow
-      if (date < now) {
+      if (date <= thailandNow) {
         date.setDate(date.getDate() + 1);
       }
       
@@ -91,11 +152,12 @@ function parseDateTime(dateTimeStr) {
     
     return null;
   } catch (error) {
+    console.error('Error parsing datetime:', error);
     return null;
   }
 }
 
-// Format date for display
+// Format date for display - Fixed timezone
 function formatDate(date) {
   const options = {
     year: 'numeric',
@@ -103,9 +165,23 @@ function formatDate(date) {
     day: '2-digit',
     hour: '2-digit',
     minute: '2-digit',
-    timeZone: 'Asia/Bangkok'
+    timeZone: 'Asia/Bangkok',
+    hour12: false
   };
-  return date.toLocaleString('th-TH', options);
+  
+  // Format in Thai locale with explicit timezone
+  const formatted = new Intl.DateTimeFormat('th-TH', options).format(date);
+  
+  // Add day of week in Thai
+  const dayOptions = { weekday: 'long', timeZone: 'Asia/Bangkok' };
+  const dayName = new Intl.DateTimeFormat('th-TH', dayOptions).format(date);
+  
+  return `${dayName} ${formatted}`;
+}
+
+// Get current Thailand time
+function getCurrentThailandTime() {
+  return new Date(new Date().toLocaleString("en-US", {timeZone: "Asia/Bangkok"}));
 }
 
 // LINE SDK middleware
@@ -114,17 +190,19 @@ app.use(express.json());
 
 // Logging middleware
 app.use((req, res, next) => {
-  console.log(`${new Date().toISOString()} - ${req.method} ${req.path}`);
+  const thailandTime = getCurrentThailandTime();
+  console.log(`${thailandTime.toISOString()} (Thailand Time) - ${req.method} ${req.path}`);
   next();
 });
 
 app.get('/', (req, res) => {
-  res.send('LINE Bot Todo List is running! 📝✅');
+  const currentTime = getCurrentThailandTime();
+  res.send(`LINE Bot Todo List is running! 📝✅<br>Current Thailand Time: ${formatDate(currentTime)}`);
 });
 
 // Webhook handler
 app.post('/webhook', (req, res) => {
-  console.log('🚀 Webhook called!');
+  console.log('🚀 Webhook called at:', formatDate(getCurrentThailandTime()));
   res.status(200).send('OK');
   
   const events = req.body.events || [];
@@ -141,7 +219,7 @@ async function handleTextMessage(event) {
   const userId = event.source.userId;
   const message = event.message.text.trim();
   
-  console.log('💬 Message received:', message);
+  console.log('💬 Message received at:', formatDate(getCurrentThailandTime()), 'Message:', message);
   
   try {
     // Initialize user's todo list if not exists
@@ -162,6 +240,8 @@ async function handleTextMessage(event) {
       await handleHelp(event);
     } else if (message.toLowerCase() === 'clear' || message.toLowerCase() === 'ล้าง') {
       await handleClearTodos(event);
+    } else if (message.toLowerCase() === 'time' || message.toLowerCase() === 'เวลา') {
+      await handleCurrentTime(event);
     } else {
       await handleUnknownCommand(event);
     }
@@ -184,7 +264,7 @@ async function handleAddTodo(event, input) {
   if (parts.length < 2) {
     await client.replyMessage(event.replyToken, {
       type: 'text',
-      text: '❌ รูปแบบไม่ถูกต้อง\n\n✅ ใช้: add งาน | เวลา\n📝 ตอวย่าง: add ประชุม | 14:30\n📝 หรือ: add ทำรายงาน | 25/12/2024 09:00'
+      text: '❌ รูปแบบไม่ถูกต้อง\n\n✅ ใช้: add งาน | เวลา\n📝 ตัวอย่าง: add ประชุม | 14:30\n📝 หรือ: add ทำรายงาน | 25/12/2024 09:00\n\n🕐 เวลาปัจจุบัน: ' + formatDate(getCurrentThailandTime())
     });
     return;
   }
@@ -197,15 +277,16 @@ async function handleAddTodo(event, input) {
   if (!reminderTime) {
     await client.replyMessage(event.replyToken, {
       type: 'text',
-      text: '❌ รูปแบบเวลาไม่ถูกต้อง\n\n✅ รูปแบบที่รองรับ:\n• 14:30 (วันนี้)\n• 25/12/2024 14:30\n• 2024-12-25 14:30'
+      text: '❌ รูปแบบเวลาไม่ถูกต้อง\n\n✅ รูปแบบที่รองรับ:\n• 14:30 (วันนี้)\n• 25/12/2024 14:30\n• 2024-12-25 14:30\n\n🕐 เวลาปัจจุบัน: ' + formatDate(getCurrentThailandTime())
     });
     return;
   }
   
-  if (reminderTime < new Date()) {
+  const currentTime = getCurrentThailandTime();
+  if (reminderTime <= currentTime) {
     await client.replyMessage(event.replyToken, {
       type: 'text',
-      text: '❌ ไม่สามารถกำหนดเวลาในอดีตได้'
+      text: `❌ ไม่สามารถกำหนดเวลาในอดีตได้\n\n🕐 เวลาปัจจุบัน: ${formatDate(currentTime)}\n⏰ เวลาที่ต้องการ: ${formatDate(reminderTime)}\n\n💡 กรุณาเลือกเวลาที่อยู่ในอนาคต`
     });
     return;
   }
@@ -218,7 +299,7 @@ async function handleAddTodo(event, input) {
   
   await client.replyMessage(event.replyToken, {
     type: 'text',
-    text: `✅ เพิ่มรายการสำเร็จ!\n\n📝 งาน: ${task}\n⏰ แจ้งเตือน: ${formatDate(reminderTime)}\n🆔 ID: ${todoId}\n\n💡 พิมพ์ "list" เพื่อดูรายการทั้งหมด`
+    text: `✅ เพิ่มรายการสำเร็จแว้ว!\n\n📝 งาน: ${task}\n⏰ หนูจะมาแจ้งเตือนคุณตอน ${formatDate(reminderTime)}\n ID: ${todoId}\n🕐\n\n💡 พิมพ์ "list" เพื่อดูรายการทั้งหมด`
   });
 }
 
@@ -246,12 +327,20 @@ async function handleCompleteTodo(event, todoId) {
     scheduledJobs.delete(todoId);
   }
   
+  // Cancel repeated reminder
+  const reminderJob = reminderJobs.get(todoId);
+  if (reminderJob) {
+    clearInterval(reminderJob);
+    reminderJobs.delete(todoId);
+    console.log(`🛑 Stopped hourly reminders for: ${todoItem.task}`);
+  }
+  
   // Remove from active list
   userTodos.splice(todoIndex, 1);
   
   await client.replyMessage(event.replyToken, {
     type: 'text',
-    text: `🎉 ทำเสร็จแล้ว!\n\n📝 งาน: ${todoItem.task}\n✅ ทำเครื่องหมายเสร็จเมื่อ: ${formatDate(new Date())}`
+    text: `🎉 ทำเสร็จแว้วววว! -3- \n\n📝 งาน: ${todoItem.task}\n\n😽 คุณเก่งมากเบย`
   });
 }
 
@@ -262,18 +351,30 @@ async function handleListTodos(event) {
   if (userTodos.length === 0) {
     await client.replyMessage(event.replyToken, {
       type: 'text',
-      text: '📋 ไม่มีรายการ Todo\n\n💡 เพิ่มรายการใหม่ด้วย: add งาน | เวลา'
+      text: '📋 ไม่มีรายการ Todo\n\n💡 เพิ่มรายการใหม่ด้วย: add งาน | เวลา ได้เลยจ้า -3-\n\n🕐 เวลาปัจจุบัน: ' + formatDate(getCurrentThailandTime())
     });
     return;
   }
   
-  let listText = '📋 รายการ Todo ของคุณ:\n\n';
+  let listText = '📋 รายการ Todo ของคุณที่หนูจดๆไว้ -3-\n\n';
+  const currentTime = getCurrentThailandTime();
+  
   userTodos.forEach((todo) => {
+    const isOverdue = todo.reminderTime <= currentTime;
+    let status = '🟢 รออยู่';
+    
+    if (isOverdue) {
+      const hoursOverdue = Math.floor((currentTime - todo.reminderTime) / (1000 * 60 * 60));
+      status = `🔴 เลยเวลาแล้ว ${hoursOverdue} ชั่วโมง รีบทำด่วน คุณรอไรอยู่รึ`;
+    }
+    
     listText += `${todo.id}. 📝 ${todo.task}\n`;
-    listText += `   ⏰ ${formatDate(todo.reminderTime)}\n\n`;
+    listText += `   ⏰ ${formatDate(todo.reminderTime)}\n`;
+    listText += `   ${status}\n\n`;
   });
   
-  listText += '💡 พิมพ์ "done <ตัวเลข>" เพื่อทำเครื่องหมายเสร็จ';
+  listText += `🕐 เวลาปัจจุบัน: ${formatDate(currentTime)}\n`;
+  listText += '💡 พิมพ์ "done <ตัวเลข>" เพื่อบอกให้หนูรู้ว่าคุณทำเสร็จแว้ว -3-';
   
   await client.replyMessage(event.replyToken, {
     type: 'text',
@@ -281,8 +382,16 @@ async function handleListTodos(event) {
   });
 }
 
+async function handleCurrentTime(event) {
+  const currentTime = getCurrentThailandTime();
+  await client.replyMessage(event.replyToken, {
+    type: 'text',
+    text: `🕐 เวลาปัจจุบัน: ${formatDate(currentTime)}\n\n💡 เวลาที่แสดงเป็นเวลาประเทศไทย (UTC+7)`
+  });
+}
+
 async function handleHelp(event) {
-  const helpText = `🤖 LINE Bot Todo List\n\n📝 คำสั่งที่ใช้ได้:\n\n• add งาน | เวลา\n  เพิ่มรายการใหม่\n  ตัวอย่าง: add ประชุม | 14:30\n\n• list หรือ รายการ\n  แสดงรายการทั้งหมด\n\n• done <ตัวเลข>\n  ทำเครื่องหมายว่าเสร็จแล้ว\n\n• clear หรือ ล้าง\n  ลบรายการทั้งหมด\n\n• help หรือ ช่วยเหลือ\n  แสดงคำสั่งทั้งหมด\n\n⏰ รูปแบบเวลา:\n• 14:30 (วันนี้)\n• 25/12/2024 14:30\n• 2024-12-25 14:30`;
+  const helpText = `🤖 LINE Bot Todo List\n\n📝 คำสั่งที่ใช้ได้:\n\n• add งาน | เวลา\n  เพิ่มรายการใหม่\n  ตัวอย่าง: add ประชุม | 14:30\n\n• list หรือ รายการ\n  แสดงรายการทั้งหมด\n\n• done <ตัวเลข>\n  ทำเครื่องหมายว่าเสร็จแล้ว\n\n• clear หรือ ล้าง\n  ลบรายการทั้งหมด\n\n• time หรือ เวลา\n  แสดงเวลาปัจจุบัน\n\n• help หรือ ช่วยเหลือ\n  แสดงคำสั่งทั้งหมด\n\n⏰ รูปแบบเวลา:\n• 14:30 (วันนี้)\n• 25/12/2024 14:30\n• 2024-12-25 14:30\n\n🔔 การแจ้งเตือน:\n• แจ้งเตือนครั้งแรกตามเวลาที่กำหนด\n• แจ้งเตือนซ้ำทุกชั่วโมง จนกว่าจะ done\n\n🕐 เวลาปัจจุบัน: ${formatDate(getCurrentThailandTime())}`;
   
   await client.replyMessage(event.replyToken, {
     type: 'text',
@@ -301,6 +410,13 @@ async function handleClearTodos(event) {
       job.cancel();
       scheduledJobs.delete(todo.id);
     }
+    
+    // Cancel repeated reminders
+    const reminderJob = reminderJobs.get(todo.id);
+    if (reminderJob) {
+      clearInterval(reminderJob);
+      reminderJobs.delete(todo.id);
+    }
   });
   
   // Clear todo list
@@ -308,20 +424,20 @@ async function handleClearTodos(event) {
   
   await client.replyMessage(event.replyToken, {
     type: 'text',
-    text: '🗑️ ลบรายการทั้งหมดเรียบร้อย!'
+    text: '🗑️ ลบรายการทั้งหมดเรียบร้อย!\n🔕 หยุดการแจ้งเตือนทั้งหมดแล้ว\n\n🕐 เวลาปัจจุบัน: ' + formatDate(getCurrentThailandTime())
   });
 }
 
 async function handleUnknownCommand(event) {
   await client.replyMessage(event.replyToken, {
     type: 'text',
-    text: '❓ ไม่เข้าใจคำสั่ง\n\n💡 พิมพ์ "help" เพื่อดูคำสั่งทั้งหมด'
+    text: 'หนูไม่เข้าใจคำสั่ง งง คุณพิมพ์อะราย -3-\n\n💡 พิมพ์ "help" เพื่อให้คนอื่นช่วย กมรสน -3-'
   });
 }
 
 // Error handling middleware
 app.use((error, req, res, next) => {
-  console.error('💥 Error occurred:', error);
+  console.error('💥 Error occurred at:', formatDate(getCurrentThailandTime()), error);
   
   if (error instanceof line.SignatureValidationFailed) {
     console.error('❌ Signature validation failed');
@@ -336,8 +452,10 @@ app.use((error, req, res, next) => {
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
+  const currentTime = getCurrentThailandTime();
   console.log(`🚀 Server is running on port ${PORT}`);
   console.log(`🌐 Webhook URL: http://localhost:${PORT}/webhook`);
+  console.log(`🕐 Server started at: ${formatDate(currentTime)}`);
   console.log('📋 Make sure your .env file contains:');
   console.log('   CHANNEL_ACCESS_TOKEN=your_channel_access_token');
   console.log('   CHANNEL_SECRET=your_channel_secret');
@@ -345,7 +463,9 @@ app.listen(PORT, () => {
   console.log('🤖 LINE Bot Todo List Features:');
   console.log('   ✅ Add todos with reminders');
   console.log('   ⏰ Schedule notifications');
+  console.log('   🔄 Repeated reminders every 1 hour');
   console.log('   📝 List all todos');
   console.log('   🎉 Mark todos as done');
   console.log('   🗑️ Clear all todos');
+  console.log('   🕐 Check current time');
 });
