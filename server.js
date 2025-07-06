@@ -24,7 +24,7 @@ class TodoItem {
     this.id = id;
     this.userId = userId;
     this.task = task;
-    this.reminderTime = reminderTime;
+    this.reminderTime = reminderTime; // เก็บเป็น Date object ที่ถูกต้อง
     this.completed = false;
     this.createdAt = new Date();
   }
@@ -75,7 +75,7 @@ function startRepeatedReminders(todoItem) {
         return;
       }
       
-      const currentTime = getCurrentThailandTime();
+      const currentTime = new Date();
       const timePassed = Math.floor((currentTime - todoItem.reminderTime) / (1000 * 60 * 60)); // hours
       
       const message = {
@@ -95,13 +95,9 @@ function startRepeatedReminders(todoItem) {
   console.log(`🔄 Started hourly reminders for: ${todoItem.task} (every 1 hour)`);
 }
 
-// Parse date and time - Fixed timezone handling
+// Parse date and time - แก้ไขปัญหา timezone
 function parseDateTime(dateTimeStr) {
   try {
-    // Get current time in Thailand timezone
-    const now = new Date();
-    const thailandNow = new Date(now.toLocaleString("en-US", {timeZone: "Asia/Bangkok"}));
-    
     if (dateTimeStr.includes(' ')) {
       const [datePart, timePart] = dateTimeStr.split(' ');
       const [hour, minute] = timePart.split(':').map(Number);
@@ -118,6 +114,7 @@ function parseDateTime(dateTimeStr) {
         if (year < 2024 || month < 1 || month > 12 || day < 1 || day > 31) {
           return null;
         }
+        // สร้าง Date object ที่ timezone ท้องถิ่น
         date = new Date(year, month - 1, day, hour, minute);
       } else if (datePart.includes('/')) {
         // Format: DD/MM/YYYY
@@ -125,6 +122,7 @@ function parseDateTime(dateTimeStr) {
         if (year < 2024 || month < 1 || month > 12 || day < 1 || day > 31) {
           return null;
         }
+        // สร้าง Date object ที่ timezone ท้องถิ่น
         date = new Date(year, month - 1, day, hour, minute);
       } else {
         return null;
@@ -140,10 +138,12 @@ function parseDateTime(dateTimeStr) {
         return null;
       }
       
-      const date = new Date(thailandNow.getFullYear(), thailandNow.getMonth(), thailandNow.getDate(), hour, minute);
+      // สร้าง Date object วันนี้ที่ timezone ท้องถิ่น
+      const now = new Date();
+      const date = new Date(now.getFullYear(), now.getMonth(), now.getDate(), hour, minute);
       
       // If time has passed today, schedule for tomorrow
-      if (date <= thailandNow) {
+      if (date <= now) {
         date.setDate(date.getDate() + 1);
       }
       
@@ -157,31 +157,31 @@ function parseDateTime(dateTimeStr) {
   }
 }
 
-// Format date for display - Fixed timezone
+// Format date for display - แก้ไขการแสดงผล
 function formatDate(date) {
-  const options = {
+  // ใช้ Intl.DateTimeFormat เพื่อแสดงในรูปแบบไทย
+  const formatter = new Intl.DateTimeFormat('th-TH', {
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
     hour: '2-digit',
     minute: '2-digit',
-    timeZone: 'Asia/Bangkok',
-    hour12: false
-  };
+    weekday: 'long',
+    timeZone: 'Asia/Bangkok'
+  });
   
-  // Format in Thai locale with explicit timezone
-  const formatted = new Intl.DateTimeFormat('th-TH', options).format(date);
-  
-  // Add day of week in Thai
-  const dayOptions = { weekday: 'long', timeZone: 'Asia/Bangkok' };
-  const dayName = new Intl.DateTimeFormat('th-TH', dayOptions).format(date);
-  
-  return `${dayName} ${formatted}`;
+  return formatter.format(date);
 }
 
-// Get current Thailand time
+// Get current Thailand time - แก้ไขฟังก์ชั่น
 function getCurrentThailandTime() {
-  return new Date(new Date().toLocaleString("en-US", {timeZone: "Asia/Bangkok"}));
+  // สร้าง Date object ปัจจุบัน
+  const now = new Date();
+  
+  // แปลงเป็น Thailand timezone
+  const thailandTime = new Date(now.toLocaleString("en-US", {timeZone: "Asia/Bangkok"}));
+  
+  return thailandTime;
 }
 
 // LINE SDK middleware
@@ -260,7 +260,7 @@ async function handleAddTodo(event, input) {
   const userId = event.source.userId;
   const userTodos = todoList.get(userId);
   
-  // Parse input: "task , time" (changed from | to ,)
+  // Parse input: "task , time" 
   const parts = input.split(',').map(part => part.trim());
   
   if (parts.length < 2) {
@@ -284,7 +284,7 @@ async function handleAddTodo(event, input) {
     return;
   }
   
-  const currentTime = getCurrentThailandTime();
+  const currentTime = new Date();
   if (reminderTime <= currentTime) {
     await client.replyMessage(event.replyToken, {
       type: 'text',
@@ -359,7 +359,7 @@ async function handleListTodos(event) {
   }
   
   let listText = '📋 รายการ Todo ของคุณที่หนูจดๆไว้ -3-\n\n';
-  const currentTime = getCurrentThailandTime();
+  const currentTime = new Date();
   
   userTodos.forEach((todo) => {
     const isOverdue = todo.reminderTime <= currentTime;
@@ -443,7 +443,6 @@ async function handleReplyName(event) {
     text: 'คุณเรียกหนูรึ 😽~'
   });
 }
-
 
 // Error handling middleware
 app.use((error, req, res, next) => {
