@@ -41,7 +41,7 @@ function scheduleReminder(todoItem) {
     try {
       const message = {
         type: 'text',
-        text: `🔔 แจ้งเตือน!\n📝 ${todoItem.task}\n\n💡 พิมพ์ "done ${todoItem.id}" เพื่อทำเครื่องหมายว่าเสร็จแล้ว`
+        text: `🔔 แจ้งเตือน! -3- ด่วนๆๆๆๆ คุณทำสิ่งนี้รึยางงง \n📝 ${todoItem.task}\n\n💡 พิมพ์ "done ${todoItem.id}" เพื่อทำเครื่องหมายว่าเสร็จแว้ว`
       };
       
       await client.pushMessage(todoItem.userId, message);
@@ -251,7 +251,7 @@ async function handleCompleteTodo(event, todoId) {
   
   await client.replyMessage(event.replyToken, {
     type: 'text',
-    text: `🎉 ทำเสร็จแล้ว!\n\n📝 งาน: ${todoItem.task}\n✅ ทำเครื่องหมายเสร็จเมื่อ: ${formatDate(new Date())}`
+    text: `🎉 ทำเสร็จแว้วววว! -3- \n\n📝 งาน: ${todoItem.task}\n✅ ทำเครื่องหมายเสร็จเมื่อ: ${formatDate(new Date())}`
   });
 }
 
@@ -262,18 +262,18 @@ async function handleListTodos(event) {
   if (userTodos.length === 0) {
     await client.replyMessage(event.replyToken, {
       type: 'text',
-      text: '📋 ไม่มีรายการ Todo\n\n💡 เพิ่มรายการใหม่ด้วย: add งาน | เวลา'
+      text: '📋 ไม่มีรายการ Todo\n\n💡 เพิ่มรายการใหม่ด้วย: add งาน | เวลา ได้่เลยจ้า -3-'
     });
     return;
   }
   
-  let listText = '📋 รายการ Todo ของคุณ:\n\n';
+  let listText = '📋 รายการ Todo ของคุณ -3-:\n\n';
   userTodos.forEach((todo) => {
     listText += `${todo.id}. 📝 ${todo.task}\n`;
     listText += `   ⏰ ${formatDate(todo.reminderTime)}\n\n`;
   });
   
-  listText += '💡 พิมพ์ "done <ตัวเลข>" เพื่อทำเครื่องหมายเสร็จ';
+  listText += '💡 พิมพ์ "done <ตัวเลข>" เพื่อทำเครื่องหมายเสร็จ -3-';
   
   await client.replyMessage(event.replyToken, {
     type: 'text',
@@ -315,7 +315,7 @@ async function handleClearTodos(event) {
 async function handleUnknownCommand(event) {
   await client.replyMessage(event.replyToken, {
     type: 'text',
-    text: '❓ ไม่เข้าใจคำสั่ง\n\n💡 พิมพ์ "help" เพื่อดูคำสั่งทั้งหมด'
+    text: 'หนูไม่เข้าใจคำสั่ง งง -3-\n\n💡 พิมพ์ "help" เพื่อดูคำสั่งทั้งหมด'
   });
 }
 
